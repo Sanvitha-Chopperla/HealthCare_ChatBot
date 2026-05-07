@@ -21,7 +21,10 @@ def get_chain():
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    vectorstore = FAISS.load_local(
+    if not os.path.exists("vectorstore"):
+        vectorstore = create_vectorstore()  # your function
+    else:
+        vectorstore = FAISS.load_local(
         "vectorstore",
         embeddings,
         allow_dangerous_deserialization=True
