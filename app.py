@@ -121,14 +121,6 @@ with st.sidebar:
                 st.warning("Please select files first.")
 
     st.markdown("---")
-    st.markdown("#### 🧠 Memory Size")
-    memory_turns = st.slider(
-        "Past messages to remember",
-        min_value=2, max_value=10, value=6, step=2,
-        label_visibility="collapsed"
-    )
-
-    st.markdown("---")
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
@@ -507,7 +499,7 @@ if user_input:
                 answer = get_answer(
                     question     = user_input,
                     chat_history = st.session_state.messages[:-1],
-                    memory_turns = memory_turns
+                    memory_turns = 6
                 )
                 st.markdown(answer)
             except Exception as e:
@@ -515,3 +507,4 @@ if user_input:
                 print(f"ERROR: {e}")
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
+
