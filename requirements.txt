@@ -1,3 +1,14 @@
+# streamlit
+# langchain
+# langchain-core
+# langchain-community
+# langchain-groq
+# langchain-huggingface
+# langchain-text-splitters
+# faiss-cpu
+# sentence-transformers
+# python-dotenv
+
 streamlit
 langchain
 langchain-core
@@ -8,3 +19,9 @@ langchain-text-splitters
 faiss-cpu
 sentence-transformers
 python-dotenv
+
+# PDF support
+pypdf
+
+# DOCX support
+docx2txt

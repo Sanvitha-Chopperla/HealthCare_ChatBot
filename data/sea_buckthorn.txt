@@ -1,4 +1,3 @@
-"""
 Sea Buckthorn (Hippophae rhamnoides) – Complete Healthcare Information
 
 1. Introduction
@@ -143,4 +142,3 @@ Possible considerations:
 Sea buckthorn is a highly nutritious medicinal plant with strong antioxidant, anti-inflammatory, and immune-supporting properties. It is widely used in traditional medicine and modern nutraceutical industries.
 
 It is considered a valuable natural resource for supporting overall health and wellness.
-"""
