@@ -1,3 +1,5 @@
+
+
 # streamlit
 # langchain
 # langchain-core
@@ -8,6 +10,12 @@
 # faiss-cpu
 # sentence-transformers
 # python-dotenv
+
+# # PDF support
+# pypdf
+
+# # DOCX support
+# docx2txt
 
 streamlit
 langchain
@@ -20,8 +28,16 @@ faiss-cpu
 sentence-transformers
 python-dotenv
 
-# PDF support
+# File loaders
 pypdf
-
-# DOCX support
 docx2txt
+unstructured
+unstructured[xlsx]
+unstructured[pptx]
+openpyxl
+python-pptx
+markdown
+
+# OCR — image text extraction
+pytesseract
+pillow
