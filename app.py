@@ -726,6 +726,17 @@ UPLOADED_DOC = [
     "from my document", "from my file", "from my pdf",
     "in my document", "in my file", "in my pdf",
     "about my uploaded",
+    # image specific
+    "my image", "my photo", "my picture", "my screenshot",
+    "uploaded image", "uploaded photo", "uploaded picture",
+    "this image", "this photo", "this picture",
+    "what is in the image", "what is in the picture", "what is in the photo",
+    "what is there in", "describe the image", "describe the picture",
+    "describe my image", "describe my picture", "describe my photo",
+    "read the image", "read the picture", "what does the image say",
+    "what does the picture say", "text in the image", "text in the picture",
+    "what is shown", "what can you see", "tell me about the image",
+    "tell me about the picture", "tell me about the photo",
 ]
 
 
@@ -818,11 +829,51 @@ def answer_uploaded_doc(question, style):
             "Please upload a file using the sidebar and click **'📥 Load Documents'**."
         )
 
-    context   = ""
-    filenames = ", ".join(st.session_state.uploaded_doc_texts.keys())
+    IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp")
+    image_files     = [f for f in st.session_state.uploaded_doc_texts if f.lower().endswith(IMAGE_EXTENSIONS)]
+    non_image_files = [f for f in st.session_state.uploaded_doc_texts if not f.lower().endswith(IMAGE_EXTENSIONS)]
 
-    for fname, text in st.session_state.uploaded_doc_texts.items():
-        snippet  = text[:3000] + "\n...[truncated]" if len(text) > 3000 else text
+    # ── Image uploaded → describe OCR extracted text ───────────────────────
+    if image_files:
+        image_context = ""
+        for fname in image_files:
+            text = st.session_state.uploaded_doc_texts[fname]
+            if text.strip():
+                image_context += f"\n\n=== Text extracted from image '{fname}' using OCR ===\n{text}"
+            else:
+                image_context += f"\n\n=== Image: {fname} ===\nNo readable text found in this image."
+
+        style_map = {
+            "short":    "Give a SHORT answer in 3-5 lines.",
+            "detailed": "Give a DETAILED structured answer.",
+            "simple":   "Use simple plain language.",
+            "normal":   "Give a clear complete answer.",
+        }
+        prompt = ChatPromptTemplate.from_template("""You are a helpful assistant.
+
+The user uploaded an image. Here is the text extracted from it using OCR:
+
+{image_context}
+
+USER ASKED: {question}
+
+INSTRUCTIONS:
+{style}
+- Describe what the image contains based on the OCR extracted text
+- If OCR found text: explain what it says clearly
+- If no text was found: say "The image does not contain readable text. It may be a photograph without any text content."
+- Be specific and accurate — do NOT make up content
+
+YOUR ANSWER:""")
+        chain = prompt | llm | StrOutputParser()
+        return chain.invoke({"image_context": image_context, "question": question, "style": style_map[style]})
+
+    # ── Non-image document → answer from full text ─────────────────────────
+    context   = ""
+    filenames = ", ".join(non_image_files)
+    for fname in non_image_files:
+        text    = st.session_state.uploaded_doc_texts[fname]
+        snippet = text[:3000] + "\n...[truncated]" if len(text) > 3000 else text
         context += f"\n\n=== FILE: {fname} ===\n{snippet}"
 
     style_map = {
@@ -831,7 +882,6 @@ def answer_uploaded_doc(question, style):
         "simple":   "Give a SIMPLE summary in plain everyday language. No jargon.",
         "normal":   "Give a clear structured summary of the main topics.",
     }
-
     prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
 
 The user uploaded: {filenames}
@@ -845,17 +895,11 @@ INSTRUCTIONS:
 {style}
 - Answer ONLY from the document content above
 - Do NOT use any other knowledge
-- If the document doesn't contain the answer, say so clearly
+- If the document does not contain the answer, say so clearly
 
 YOUR ANSWER:""")
-
     chain = prompt | llm | StrOutputParser()
-    return chain.invoke({
-        "filenames": filenames,
-        "context":   context,
-        "question":  question,
-        "style":     style_map[style]
-    })
+    return chain.invoke({"filenames": filenames, "context": context, "question": question, "style": style_map[style]})
 
 
 def answer_sea_buckthorn(question, chat_history, style):
@@ -866,19 +910,57 @@ def answer_sea_buckthorn(question, chat_history, style):
     history = get_history(chat_history)
 
     # ── Detect follow-up vs fresh question ────────────────────────────────
+    # These are ALL the ways a user might say "continue the previous topic"
     FOLLOWUP = [
         "more specific", "be specific", "elaborate", "tell me more",
         "more detail", "expand", "explain more", "go deeper",
-        "in short", "briefly", "give example", "more about it",
-        "more about that", "continue", "what else",
+        "in short", "briefly", "tell me briefly", "brief",
+        "give example", "more about it", "more about that",
+        "continue", "what else", "and", "also",
+        "be more", "give more", "show more", "say more",
+        "specifically", "in detail", "in brief",
     ]
     is_followup = any(kw in question.lower() for kw in FOLLOWUP)
 
+    # Also treat very short questions (under 4 words) as follow-ups
+    # e.g. "tell me briefly", "be specific", "in short"
+    word_count   = len(question.strip().split())
+    if word_count <= 4 and history != "None":
+        is_followup = True
+
     if is_followup:
-        lines    = history.split("\n")
-        last_bot = next((l.replace("Assistant:", "").strip()
-                         for l in reversed(lines) if l.startswith("Assistant:")), "")
-        search_query = f"Sea Buckthorn {last_bot[:150]}" if last_bot else f"Sea Buckthorn {question}"
+        # Find the LAST non-followup user question = the actual topic
+        lines         = history.split("\n")
+        topic_question = ""
+
+        # Walk backwards through history to find last meaningful user question
+        # Skip follow-up questions like "tell me briefly", "in short", etc
+        FOLLOWUP_PHRASES = [
+            "briefly", "brief", "in short", "in detail", "elaborate",
+            "more specific", "tell me more", "explain more", "be specific",
+            "give example", "expand", "continue", "what else", "say more",
+            "specifically", "more about", "go deeper"
+        ]
+
+        for l in reversed(lines):
+            if l.startswith("User:"):
+                user_q = l.replace("User:", "").strip()
+                # Check if this user message is itself a follow-up
+                is_this_followup = any(kw in user_q.lower() for kw in FOLLOWUP_PHRASES)
+                is_this_short    = len(user_q.split()) <= 4
+                if not is_this_followup and not is_this_short:
+                    topic_question = user_q
+                    break
+
+        # If we found a real topic question, use it; else use last bot answer
+        if topic_question:
+            search_query = f"Sea Buckthorn {topic_question[:200]}"
+        else:
+            last_bot = next((l.replace("Assistant:", "").strip()
+                             for l in reversed(lines) if l.startswith("Assistant:")), "")
+            search_query = f"Sea Buckthorn {last_bot[:150]}" if last_bot else f"Sea Buckthorn {question}"
+
+        print(f"\n🔁 Follow-up detected. Topic: {search_query[:80]}")
 
     else:
         # ── Brand/company/link — read full file directly ───────────────────
@@ -955,11 +1037,22 @@ YOUR ANSWER:""")
         )
 
     style_map = {
-        "short":    "Answer in 3-5 lines only. No bullet points.",
+        "short":    "Answer in 3-5 lines ONLY. No bullet points. Be very concise.",
         "detailed": "Give a detailed structured answer with numbered points.",
         "simple":   "Use very simple plain language. No medical terms.",
         "normal":   "Give a clear well-structured answer with bullet points where helpful.",
     }
+
+    # Detect what the user ACTUALLY wants based on their follow-up phrasing
+    q_lower = question.lower()
+    if any(w in q_lower for w in ["briefly", "brief", "in brief", "in short", "shortly", "short"]):
+        forced_style = "Answer in maximum 3-5 lines. Be very concise. No bullet points."
+    elif any(w in q_lower for w in ["detail", "elaborate", "specific", "expand", "explain"]):
+        forced_style = "Give a detailed structured answer with numbered points covering all aspects."
+    elif any(w in q_lower for w in ["simple", "easy", "plain"]):
+        forced_style = "Use very simple plain language. No medical jargon."
+    else:
+        forced_style = style_map[style]
 
     prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
 
@@ -971,17 +1064,21 @@ CONTEXT FROM DOCUMENTS:
 
 USER QUESTION: {question}
 
-INSTRUCTIONS:
-{style}
+CRITICAL INSTRUCTIONS — READ CAREFULLY:
+1. Look at the CONVERSATION HISTORY to find the LAST REAL TOPIC discussed
+   (ignore short follow-ups like "briefly", "in short", "tell me more")
+2. The LAST REAL TOPIC is what you must answer about — DO NOT switch topics
+3. Response style for this answer: {style}
+4. Use ONLY information from the CONTEXT above
+5. If not in context: "I don't have that information in my documents."
+6. Copy links and URLs exactly as they appear
+7. For brand questions: list ALL brands, do not skip any
 
-IMPORTANT:
-- If user says "be more specific" / "elaborate" / "tell me more":
-  Look at the conversation history. Find the LAST topic discussed.
-  Give more detail on THAT SAME TOPIC. Do NOT switch topics.
-- Use ONLY information from the context above
-- If not in context: "I don't have that information in my documents."
-- Copy links and URLs exactly as they appear — never modify them
-- For brand questions: list ALL brands from context, do not skip any
+EXAMPLE:
+  History: User asked "who should not use this" → Bot answered about safety
+  User now says: "tell me in brief"
+  CORRECT: Give a BRIEF answer about WHO SHOULD NOT USE SEA BUCKTHORN ✅
+  WRONG: Talk about general Sea Buckthorn info ❌
 
 ANSWER:""")
 
@@ -990,7 +1087,7 @@ ANSWER:""")
         "history":  history,
         "context":  context,
         "question": question,
-        "style":    style_map[style]
+        "style":    forced_style
     })
 
 # ─────────────────────────────────────────────────────────────────────────────
