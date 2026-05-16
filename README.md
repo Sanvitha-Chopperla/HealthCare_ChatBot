@@ -92,8 +92,6 @@ Download and install from the [Tesseract OCR GitHub](https://github.com/tesserac
 pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 ```
 
-> **Linux / macOS**: Tesseract can be installed via your package manager (`apt`, `brew`), and the path can usually be omitted or detected automatically.
-
 ### 4 — Configure environment variables
 
 Create a `.env` file in the project root:
@@ -113,8 +111,8 @@ streamlit run app.py
 ## 🧠 How to Use
 
 1. **Upload** one or more documents using the file uploader in the sidebar.
-2. Click **Load Documents** to index and embed the content.
-3. **Ask a question** in the chat input — a grounded answer and evaluation metrics will be generated automatically.
+2. Click **Load Documents** 
+3. **Ask a question** in the chat input — required answer and evaluation metrics will be generated automatically.
 
 ### Example questions
 
