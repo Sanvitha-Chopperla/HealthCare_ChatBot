@@ -1,480 +1,4 @@
-# import os
-# import tempfile
-# import streamlit as st
-# from dotenv import load_dotenv
-# from langchain_groq import ChatGroq
-# from langchain_core.prompts import ChatPromptTemplate
-# from langchain_community.vectorstores import FAISS
-# from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-# from langchain_huggingface import HuggingFaceEmbeddings
-# from langchain_core.output_parsers import StrOutputParser
-# from langchain_text_splitters import RecursiveCharacterTextSplitter
-# load_dotenv()
-# st.set_page_config(page_title="Sea Buckthorn Healthcare Chatbot", layout="wide")
-# # SESSION STATE
-# if "messages"             not in st.session_state: st.session_state.messages             = []
-# if "default_vectorstore"  not in st.session_state: st.session_state.default_vectorstore  = None
-# if "uploaded_vectorstore" not in st.session_state: st.session_state.uploaded_vectorstore = None
-# if "uploaded_doc_texts"   not in st.session_state: st.session_state.uploaded_doc_texts   = {}
-# # AI COMPONENTS — load once
-# @st.cache_resource(show_spinner="Loading AI models...")
-# def load_base_components():
-#     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-#     llm = ChatGroq(
-#         model="llama-3.1-8b-instant",
-#         temperature=0.3,
-#         api_key=os.getenv("GROQ_API_KEY")
-#     )
-#     return embeddings, llm
 
-# embeddings, llm = load_base_components()
-# # FILE LOADING HELPERS
-# def read_file(source, filename, is_upload=False):
-#     """Load any PDF/DOCX/TXT. Returns (docs, full_text)."""
-#     suffix = os.path.splitext(filename)[1].lower()
-#     try:
-#         if is_upload:
-#             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-#                 tmp.write(source.read())
-#                 path = tmp.name
-#         else:
-#             path = source
-
-#         if   suffix == ".pdf":  loader = PyPDFLoader(path)
-#         elif suffix == ".docx": loader = Docx2txtLoader(path)
-#         elif suffix == ".txt":  loader = TextLoader(path, encoding="utf-8")
-#         else: return [], ""
-
-#         docs = loader.load()
-#         for doc in docs:
-#             doc.metadata["source"] = filename
-
-#         full_text = "\n\n".join(d.page_content for d in docs)
-#         if is_upload: os.unlink(path)
-#         return docs, full_text
-
-#     except Exception as e:
-#         st.sidebar.error(f"❌ {filename}: {e}")
-#         return [], ""
-# def load_data_folder():
-#     docs = []
-#     if not os.path.exists("data"): return docs
-#     for fname in os.listdir("data"):
-#         fpath = os.path.join("data", fname)
-#         if os.path.isdir(fpath): continue
-#         d, _ = read_file(fpath, fname, is_upload=False)
-#         docs.extend(d)
-#     return docs
-# def build_vectorstore(documents):
-#     splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300)
-#     chunks = splitter.split_documents(documents)
-#     return FAISS.from_documents(chunks, embeddings)
-# # SIDEBAR — clean, only what's needed
-# with st.sidebar:
-#     st.title("⚙️ Settings")
-
-#     st.markdown("#### 📄 Upload Documents")
-#     uploaded_files = st.file_uploader(
-#         "PDF / DOCX / TXT",
-#         type=["pdf", "docx", "txt"],
-#         accept_multiple_files=True,
-#         label_visibility="collapsed"
-#     )
-
-#     if st.button("📥 Load Documents", use_container_width=True):
-#         with st.spinner("Processing..."):
-#             if uploaded_files:
-#                 all_docs, all_texts = [], {}
-#                 for uf in uploaded_files:
-#                     docs, text = read_file(uf, uf.name, is_upload=True)
-#                     all_docs.extend(docs)
-#                     if text: all_texts[uf.name] = text
-#                 if all_docs:
-#                     st.session_state.uploaded_vectorstore = build_vectorstore(all_docs)
-#                     st.session_state.uploaded_doc_texts   = all_texts
-#                     st.success(f"✅ Loaded: {', '.join(all_texts.keys())}")
-#                 else:
-#                     st.error("Could not load files.")
-#             else:
-#                 st.warning("Please select files first.")
-
-#     st.markdown("---")
-#     if st.button("🗑️ Clear Chat", use_container_width=True):
-#         st.session_state.messages = []
-#         st.rerun()
-# # AUTO-LOAD DEFAULT DOCS ON FIRST RUN
-# if st.session_state.default_vectorstore is None:
-#     with st.spinner("📚 Loading default knowledge base..."):
-#         default_docs = load_data_folder()
-#         if default_docs:
-#             st.session_state.default_vectorstore = build_vectorstore(default_docs)
-# # QUERY CLASSIFICATION — done FIRST before any LLM call
-# # Exact casual phrases — reply friendly, no Sea Buckthorn
-# CASUAL = [
-#     "hi", "hello", "hey", "hiya", "howdy",
-#     "how are you", "how r u", "how are u",
-#     "how was your day", "how is your day",
-#     "good morning", "good evening", "good afternoon", "good night",
-#     "what's up", "whats up", "sup",
-#     "who are you", "what are you",
-#     "thank you", "thanks", "thank u", "thx",
-#     "bye", "goodbye", "see you", "see ya",
-#     "ok", "okay", "cool", "great", "nice", "awesome",
-#     "well done", "good job", "nice work",
-# ]
-# # Off-topic subjects 
-# OFFTOPIC = [
-#     "cricket", "football", "soccer", "ipl", "nba", "sports",
-#     "movie", "film", "series", "netflix", "song", "music", "album",
-#     "weather", "rain", "temperature",
-#     "stock", "share market", "bitcoin", "crypto",
-#     "politics", "election", "government", "war",
-#     "recipe", "cooking", "restaurant",
-#     "travel", "tour", "vacation", "trip",
-#     "joke", "funny", "meme",
-#     "girlfriend", "boyfriend", "love", "marriage",
-#     "programming", "code", "software", "developer",
-# ]
-# # Uploaded doc phrases — answer from uploaded file only
-# UPLOADED_DOC = [
-#     "my uploaded document", "my document", "my pdf", "my file", "my book",
-#     "uploaded document", "uploaded file", "uploaded pdf", "uploaded book",
-#     "this document", "this file", "this pdf", "this book",
-#     "what i uploaded", "the document i uploaded",
-#     "summarize my", "summary of my",
-#     "tell me about my document", "tell me about my file", "tell me about my pdf",
-#     "what is in my", "overview of my",
-#     "shortly about my", "brief about my",
-#     "from my document", "from my file", "from my pdf",
-#     "in my document", "in my file", "in my pdf",
-#     "about my uploaded",
-# ]
-
-# def classify(user_input):
-#     """
-#     Returns: 'casual' | 'offtopic' | 'uploaded_doc' | 'sea_buckthorn'
-#     Checks exact keyword lists — no LLM needed, zero tokens used.
-#     """
-#     txt = user_input.lower().strip()
-
-#     # Check casual first — simple greetings/thanks
-#     for kw in CASUAL:
-#         if kw == txt or txt.startswith(kw) or txt.endswith(kw) or f" {kw} " in f" {txt} ":
-#             return "casual"
-
-#     # Check off-topic
-#     for kw in OFFTOPIC:
-#         if kw in txt:
-#             return "offtopic"
-
-#     # Check uploaded doc reference
-#     for kw in UPLOADED_DOC:
-#         if kw in txt:
-#             return "uploaded_doc"
-
-#     # Everything else = Sea Buckthorn question
-#     return "sea_buckthorn"
-
-
-# def detect_style(txt):
-#     txt = txt.lower()
-#     if any(w in txt for w in ["short","shortly","brief","briefly","summarize","summary","quick","overview"]):
-#         return "short"
-#     if any(w in txt for w in ["detail","detailed","full","elaborate","specific","expand","explain"]):
-#         return "detailed"
-#     if any(w in txt for w in ["simple","easy","beginner","basic","plain"]):
-#         return "simple"
-#     return "normal"
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # HISTORY HELPER
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def get_history(messages, memory_turns):
-#     if not messages: return "None"
-#     lines = []
-#     for msg in messages[-memory_turns:]:
-#         role    = "User" if msg["role"] == "user" else "Assistant"
-#         content = msg["content"][:250] + "..." if len(msg["content"]) > 250 else msg["content"]
-#         lines.append(f"{role}: {content}")
-#     return "\n".join(lines)
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # ANSWER FUNCTIONS
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def answer_casual(question):
-#     """1-2 sentence friendly reply. No Sea Buckthorn content."""
-#     casual_responses = {
-#         "hi": "Hello! 👋 How can I help you with Sea Buckthorn today?",
-#         "hello": "Hello! 👋 How can I help you with Sea Buckthorn today?",
-#         "hey": "Hey! How can I help you today?",
-#         "thank you": "You're welcome! Feel free to ask anything about Sea Buckthorn. 🌿",
-#         "thanks": "You're welcome! Feel free to ask anything about Sea Buckthorn. 🌿",
-#         "bye": "Goodbye! Take care! 👋",
-#         "goodbye": "Goodbye! Take care! 👋",
-#         "good morning": "Good morning! ☀️ Hope you have a great day. How can I help you with Sea Buckthorn?",
-#         "good evening": "Good evening! 🌙 How can I help you with Sea Buckthorn today?",
-#     }
-#     q = question.lower().strip()
-#     for key, response in casual_responses.items():
-#         if key in q:
-#             return response
-
-#     # For other casual phrases use a tiny LLM call
-#     prompt = ChatPromptTemplate.from_template(
-#         'The user said: "{question}"\n'
-#         "Reply in exactly 1-2 friendly sentences. "
-#         "Do NOT mention Sea Buckthorn or give any health info. "
-#         "Just be warm and natural.\nREPLY:"
-#     )
-#     return (prompt | llm | StrOutputParser()).invoke({"question": question})
-
-
-# def answer_offtopic(question):
-#     return (
-#         "I'm a Sea Buckthorn healthcare specialist and can't help with that topic. 😊\n\n"
-#         "Ask me anything about Sea Buckthorn — its benefits, nutrition, safety, uses, and more! 🌿"
-#     )
-
-
-# def answer_uploaded_doc(question, style):
-#     """Answer from uploaded docs ONLY — completely separate from data/ folder."""
-#     if not st.session_state.uploaded_doc_texts:
-#         return (
-#             "⚠️ No uploaded documents found.\n\n"
-#             "Please upload a file using the sidebar and click **'📥 Load Documents'**."
-#         )
-
-#     # Build context from uploaded docs full text (not retriever — avoids mixing)
-#     context = ""
-#     for fname, text in st.session_state.uploaded_doc_texts.items():
-#         # Take up to 3000 chars per doc
-#         snippet = text[:3000] + "\n...[truncated for length]" if len(text) > 3000 else text
-#         context += f"\n\n=== FILE: {fname} ===\n{snippet}"
-
-#     filenames = ", ".join(st.session_state.uploaded_doc_texts.keys())
-
-#     style_map = {
-#         "short":    "Give a SHORT summary: 5-7 bullet points. Be concise.",
-#         "detailed": "Give a DETAILED summary with clear sections and numbered points.",
-#         "simple":   "Give a SIMPLE summary in plain everyday language. No jargon.",
-#         "normal":   "Give a clear structured summary of the main topics.",
-#     }
-
-#     prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
-
-# The user uploaded this document: {filenames}
-
-# DOCUMENT CONTENT (answer ONLY from this):
-# {context}
-
-# USER ASKED: {question}
-
-# INSTRUCTIONS:
-# {style}
-# - Answer ONLY from the document content above
-# - Do NOT use any other knowledge
-# - Cover the main points clearly
-# - If the document doesn't contain the answer, say so
-
-# YOUR ANSWER:""")
-
-#     chain = prompt | llm | StrOutputParser()
-#     return chain.invoke({
-#         "filenames": filenames,
-#         "context":   context,
-#         "question":  question,
-#         "style":     style_map[style]
-#     })
-
-
-# def answer_sea_buckthorn(question, chat_history, memory_turns, style):
-#     """Answer from default data/ folder with full conversation memory."""
-#     if st.session_state.default_vectorstore is None:
-#         return "Default knowledge base not loaded. Please add files to the data/ folder."
-
-#     history = get_history(chat_history, memory_turns)
-
-#     # Detect follow-up vs fresh question — no LLM needed
-#     FOLLOWUP = [
-#         "more specific", "be specific", "elaborate", "tell me more",
-#         "more detail", "expand", "explain more", "go deeper",
-#         "in short", "briefly", "give example", "more about it",
-#         "more about that", "continue", "what else", "and then",
-#     ]
-#     is_followup = any(kw in question.lower() for kw in FOLLOWUP)
-
-#     if is_followup:
-#         # Extract topic from last assistant message
-#         lines = history.split("\n")
-#         last_bot = next((l.replace("Assistant:", "").strip()
-#                          for l in reversed(lines) if l.startswith("Assistant:")), "")
-#         search_query = f"Sea Buckthorn {last_bot[:150]}" if last_bot else f"Sea Buckthorn {question}"
-#     else:
-#         # For brand/company/link questions — read the FULL txt file directly
-#         # This bypasses chunking issues entirely and guarantees all brands are found
-#         BRAND_KEYWORDS = [
-#             "brand", "brands", "name the brand", "brand name",
-#             "which company", "which brand", "who provides", "who sells",
-#             "company name", "companies name", "link", "website", "url",
-#             "where to buy", "where can i buy", "where to purchase",
-#             "name the brands", "list the brands", "list brands"
-#         ]
-#         is_brand_query = any(kw in question.lower() for kw in BRAND_KEYWORDS)
-
-#         if is_brand_query:
-#             # Read full txt files directly — no retriever, no chunking issues
-#             full_file_content = ""
-#             if os.path.exists("data"):
-#                 for fname in os.listdir("data"):
-#                     fpath = os.path.join("data", fname)
-#                     if fname.endswith(".txt"):
-#                         try:
-#                             with open(fpath, "r", encoding="utf-8") as f:
-#                                 full_file_content += f"\n\n=== {fname} ===\n" + f.read()
-#                         except:
-#                             pass
-#             if full_file_content:
-#                 brand_prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
-
-# FULL DOCUMENT CONTENT:
-# {content}
-
-# USER QUESTION: {question}
-
-# INSTRUCTIONS:
-# - Find all brand names and companies mentioned in the document
-# - For brands WITH full details (website, products, use cases): show all details
-# - For brands with NO details: print the name ONLY — no other text whatsoever
-# - STRICTLY FORBIDDEN to write: "Not provided", "Not specified", "No details", "not mentioned", or any similar phrase
-# - Copy website URLs exactly as they appear
-# - Do NOT add information from your own knowledge
-
-# YOUR ANSWER:""")
-#                 brand_chain = brand_prompt | llm | StrOutputParser()
-#                 return brand_chain.invoke({"content": full_file_content, "question": question})
-#             search_query = "Sea Buckthorn companies brands WellWith Vedberry"
-#         else:
-#             search_query = f"Sea Buckthorn {question}"
-
-#     print(f"\n🔍 Search: {search_query}")
-
-#     # Fetch more chunks for link/brand queries so URLs are never cut off
-#     LINK_KEYWORDS = [
-#         "link", "url", "website",
-#         "name the brand", "brand name", "which brand", "which company",
-#         "who provides", "who sells", "where to buy", "where to purchase",
-#         "wellwith", "vedberry", "leh berry", "himaleh", "biosash", "nutriorg",
-#         "patanjali", "miracle seabuck", "top 3 brand", "top 5 brand"
-#     ]
-#     k = 8 if any(kw in question.lower() for kw in LINK_KEYWORDS) else 4
-
-#     retriever = st.session_state.default_vectorstore.as_retriever(
-#         search_type="similarity", search_kwargs={"k": k}
-#     )
-#     docs = retriever.invoke(search_query)
-
-#     # For link queries return FULL chunk content — never truncate URLs
-#     if k == 8:
-#         context = "\n\n".join(
-#             f"[{d.metadata.get('source','?')}]:\n{d.page_content}" for d in docs
-#         )
-#     else:
-#         context = "\n\n".join(
-#             f"[{d.metadata.get('source','?')}]: {d.page_content[:400]}" for d in docs
-#         )
-
-#     style_map = {
-#         "short":    "Answer in 3-5 lines only. No bullet points.",
-#         "detailed": "Give a detailed structured answer with numbered points.",
-#         "simple":   "Use very simple plain language. No medical terms.",
-#         "normal":   "Give a clear well-structured answer with bullet points where helpful.",
-#     }
-
-#     prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
-
-# CONVERSATION HISTORY:
-# {history}
-
-# CONTEXT FROM DOCUMENTS:
-# {context}
-
-# USER QUESTION: {question}
-
-# INSTRUCTIONS:
-# {style}
-
-# IMPORTANT:
-# - If user says "be more specific" / "elaborate" / "tell me more":
-#   Look at the conversation history. Find the LAST topic discussed.
-#   Give more detail on THAT SAME TOPIC. Do NOT switch topics.
-# - Use ONLY information from the context above
-# - If not in context: "I don't have that information in my documents."
-# - If the context contains links or URLs, copy them EXACTLY as they appear — do not modify or summarize them
-# - For brand/company questions: list ALL brands mentioned in the context — do not skip any
-# - For each brand include: name, website link, products, and use cases exactly as in the context
-# - Do NOT add brands from your own knowledge — only from the context
-
-# ANSWER:""")
-
-#     chain = prompt | llm | StrOutputParser()
-#     return chain.invoke({
-#         "history":  history,
-#         "context":  context,
-#         "question": question,
-#         "style":    style_map[style]
-#     })
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # MAIN ROUTER
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# def get_answer(question, chat_history, memory_turns):
-#     query_type = classify(question)
-#     style      = detect_style(question)
-
-#     print(f"\n🏷️  Type: {query_type} | Style: {style}")
-
-#     if   query_type == "casual":       return answer_casual(question)
-#     elif query_type == "offtopic":     return answer_offtopic(question)
-#     elif query_type == "uploaded_doc": return answer_uploaded_doc(question, style)
-#     else:                              return answer_sea_buckthorn(question, chat_history, memory_turns, style)
-
-# # ─────────────────────────────────────────────────────────────────────────────
-# # MAIN CHAT UI
-# # ─────────────────────────────────────────────────────────────────────────────
-
-# st.title("🌿 Sea Buckthorn Healthcare Chatbot")
-# st.caption("Upload documents and ask anything — I answer from the right source!")
-
-# for msg in st.session_state.messages:
-#     with st.chat_message(msg["role"]):
-#         st.markdown(msg["content"])
-
-# user_input = st.chat_input("Ask anything about Sea Buckthorn...")
-
-# if user_input:
-#     st.session_state.messages.append({"role": "user", "content": user_input})
-#     with st.chat_message("user"):
-#         st.markdown(user_input)
-
-#     answer = "Sorry, I encountered an error. Please try again."
-
-#     with st.chat_message("assistant"):
-#         with st.spinner("Thinking..."):
-#             try:
-#                 answer = get_answer(
-#                     question     = user_input,
-#                     chat_history = st.session_state.messages[:-1],
-#                     memory_turns = 6
-#                 )
-#                 st.markdown(answer)
-#             except Exception as e:
-#                 st.error(f"Error: {str(e)}")
-#                 print(f"ERROR: {e}")
-
-#     st.session_state.messages.append({"role": "assistant", "content": answer})
 
 import os
 import json
@@ -512,14 +36,12 @@ if "uploaded_vectorstore" not in st.session_state: st.session_state.uploaded_vec
 if "uploaded_doc_texts"   not in st.session_state: st.session_state.uploaded_doc_texts   = {}
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AI COMPONENTS — load once
+# AI COMPONENTS
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_resource(show_spinner="Loading AI models...")
 def load_base_components():
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     llm = ChatGroq(
         model="llama-3.1-8b-instant",
         temperature=0.3,
@@ -530,15 +52,12 @@ def load_base_components():
 embeddings, llm = load_base_components()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FILE LOADING HELPERS
+# FILE LOADING
 # ─────────────────────────────────────────────────────────────────────────────
 
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp")
+
 def read_file(source, filename, is_upload=False):
-    """
-    Load any supported file type.
-    Supported: PDF, DOCX, TXT, CSV, Excel, PPT, Markdown, JSON, Images (OCR)
-    Returns (docs, full_text)
-    """
     suffix = os.path.splitext(filename)[1].lower()
     try:
         if is_upload:
@@ -548,7 +67,7 @@ def read_file(source, filename, is_upload=False):
         else:
             path = source
 
-        # ── JSON — handled manually ────────────────────────────────────────
+        # JSON
         if suffix == ".json":
             with open(path, "r", encoding="utf-8") as jf:
                 data = json.load(jf)
@@ -558,40 +77,30 @@ def read_file(source, filename, is_upload=False):
             if is_upload: os.unlink(path)
             return docs, text
 
-        # ── Images — OCR via Tesseract ─────────────────────────────────────
-        elif suffix in (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp"):
+        # Images — OCR
+        elif suffix in IMAGE_EXTS:
             image = Image.open(path)
             text  = pytesseract.image_to_string(image)
+            if is_upload: os.unlink(path)
             if not text.strip():
-                if is_upload: os.unlink(path)
                 return [], ""
             from langchain_core.documents import Document
             docs = [Document(page_content=text, metadata={"source": filename})]
-            if is_upload: os.unlink(path)
             return docs, text
 
-        # ── All other formats — LangChain loaders ─────────────────────────
-        elif suffix == ".pdf":
-            loader = PyPDFLoader(path)
-        elif suffix == ".docx":
-            loader = Docx2txtLoader(path)
-        elif suffix == ".txt":
-            loader = TextLoader(path, encoding="utf-8")
-        elif suffix == ".csv":
-            loader = CSVLoader(path, encoding="utf-8")
-        elif suffix in (".xls", ".xlsx"):
-            loader = UnstructuredExcelLoader(path)
-        elif suffix in (".ppt", ".pptx"):
-            loader = UnstructuredPowerPointLoader(path)
-        elif suffix in (".md", ".markdown"):
-            loader = UnstructuredMarkdownLoader(path)
-        else:
-            return [], ""
+        # All other formats
+        elif suffix == ".pdf":   loader = PyPDFLoader(path)
+        elif suffix == ".docx":  loader = Docx2txtLoader(path)
+        elif suffix == ".txt":   loader = TextLoader(path, encoding="utf-8")
+        elif suffix == ".csv":   loader = CSVLoader(path, encoding="utf-8")
+        elif suffix in (".xls", ".xlsx"): loader = UnstructuredExcelLoader(path)
+        elif suffix in (".ppt", ".pptx"): loader = UnstructuredPowerPointLoader(path)
+        elif suffix in (".md", ".markdown"): loader = UnstructuredMarkdownLoader(path)
+        else: return [], ""
 
         docs = loader.load()
         for doc in docs:
             doc.metadata["source"] = filename
-
         full_text = "\n\n".join(d.page_content for d in docs)
         if is_upload: os.unlink(path)
         return docs, full_text
@@ -602,25 +111,18 @@ def read_file(source, filename, is_upload=False):
 
 
 def load_data_folder():
-    """Load all supported files from the data/ folder."""
     docs = []
-    if not os.path.exists("data"):
-        return docs
+    if not os.path.exists("data"): return docs
     for fname in os.listdir("data"):
         fpath = os.path.join("data", fname)
-        if os.path.isdir(fpath):
-            continue
+        if os.path.isdir(fpath): continue
         d, _ = read_file(fpath, fname, is_upload=False)
         docs.extend(d)
     return docs
 
 
 def build_vectorstore(documents):
-    """Split documents into chunks and build FAISS vectorstore."""
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=3000,
-        chunk_overlap=300
-    )
+    splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300)
     chunks = splitter.split_documents(documents)
     return FAISS.from_documents(chunks, embeddings)
 
@@ -630,18 +132,13 @@ def build_vectorstore(documents):
 
 with st.sidebar:
     st.title("⚙️ Settings")
-
     st.markdown("#### 📄 Upload Documents")
     st.caption("PDF, DOCX, TXT, CSV, Excel, PPT, Markdown, JSON, Images (JPG/PNG/BMP/TIFF)")
 
     uploaded_files = st.file_uploader(
         "Upload files",
-        type=[
-            "pdf", "docx", "txt", "csv",
-            "xls", "xlsx", "ppt", "pptx",
-            "md", "json",
-            "jpg", "jpeg", "png", "bmp", "tiff", "webp"
-        ],
+        type=["pdf","docx","txt","csv","xls","xlsx","ppt","pptx",
+              "md","json","jpg","jpeg","png","bmp","tiff","webp"],
         accept_multiple_files=True,
         label_visibility="collapsed"
     )
@@ -653,25 +150,23 @@ with st.sidebar:
                 for uf in uploaded_files:
                     docs, text = read_file(uf, uf.name, is_upload=True)
                     all_docs.extend(docs)
-                    if text:
-                        all_texts[uf.name] = text
+                    if text: all_texts[uf.name] = text
                 if all_docs:
                     st.session_state.uploaded_vectorstore = build_vectorstore(all_docs)
                     st.session_state.uploaded_doc_texts   = all_texts
                     st.success(f"✅ Loaded: {', '.join(all_texts.keys())}")
                 else:
-                    st.error("Could not load files. Check format or content.")
+                    st.error("Could not load files.")
             else:
                 st.warning("Please select files first.")
 
     st.markdown("---")
-
     if st.button("🗑️ Clear Chat", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# AUTO-LOAD DEFAULT DOCS ON FIRST RUN
+# AUTO-LOAD DEFAULT DOCS
 # ─────────────────────────────────────────────────────────────────────────────
 
 if st.session_state.default_vectorstore is None:
@@ -685,63 +180,56 @@ if st.session_state.default_vectorstore is None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 CASUAL = [
-    "hi", "hello", "hey", "hiya", "howdy",
-    "how are you", "how r u", "how are u",
-    "how was your day", "how is your day",
-    "good morning", "good evening", "good afternoon", "good night",
-    "what's up", "whats up", "sup",
-    "who are you", "what are you",
-    "thank you", "thanks", "thank u", "thx",
-    "bye", "goodbye", "see you", "see ya",
-    "ok", "okay", "cool", "great", "nice", "awesome",
-    "well done", "good job", "nice work",
+    "hi","hello","hey","hiya","howdy",
+    "how are you","how r u","how are u",
+    "how was your day","how is your day",
+    "good morning","good evening","good afternoon","good night",
+    "what's up","whats up","sup",
+    "who are you","what are you",
+    "thank you","thanks","thank u","thx",
+    "bye","goodbye","see you","see ya",
+    "ok","okay","cool","great","nice","awesome",
+    "well done","good job","nice work",
 ]
 
 OFFTOPIC = [
-    "cricket", "football", "soccer", "ipl", "nba", "sports",
-    "movie", "film", "series", "netflix", "song", "music", "album",
-    "weather", "rain", "temperature",
-    "stock", "share market", "bitcoin", "crypto",
-    "politics", "election", "government", "war",
-    "recipe", "cooking", "restaurant",
-    "travel", "tour", "vacation", "trip",
-    "joke", "funny", "meme",
-    "girlfriend", "boyfriend", "love", "marriage",
-    "programming", "code", "software", "developer",
+    "cricket","football","soccer","ipl","nba","sports",
+    "movie","film","series","netflix","song","music","album",
+    "weather","rain","temperature",
+    "stock","share market","bitcoin","crypto",
+    "politics","election","government","war",
+    "recipe","cooking","restaurant",
+    "travel","tour","vacation","trip",
+    "joke","funny","meme",
+    "girlfriend","boyfriend","love","marriage",
+    "programming","code","software","developer",
 ]
 
 UPLOADED_DOC = [
-    "my uploaded document", "my document", "my pdf", "my file", "my book",
-    "my image", "my photo", "my picture",
-    "uploaded document", "uploaded file", "uploaded pdf", "uploaded book",
-    "uploaded image", "uploaded photo",
-    "this document", "this file", "this pdf", "this book",
-    "this image", "this photo",
-    "what i uploaded", "the document i uploaded",
-    "summarize my", "summary of my",
-    "tell me about my document", "tell me about my file", "tell me about my pdf",
-    "tell me about my image",
-    "what is in my", "overview of my",
-    "shortly about my", "brief about my",
-    "from my document", "from my file", "from my pdf",
-    "in my document", "in my file", "in my pdf",
+    "my uploaded document","my document","my pdf","my file","my book",
+    "my image","my photo","my picture","my screenshot",
+    "uploaded document","uploaded file","uploaded pdf","uploaded book",
+    "uploaded image","uploaded photo","uploaded picture",
+    "this document","this file","this pdf","this book",
+    "this image","this photo","this picture",
+    "what i uploaded","the document i uploaded",
+    "summarize my","summary of my",
+    "tell me about my document","tell me about my file","tell me about my pdf",
+    "tell me about my image","tell me about my photo","tell me about my picture",
+    "what is in my","overview of my",
+    "shortly about my","brief about my",
+    "from my document","from my file","from my pdf",
+    "in my document","in my file","in my pdf",
     "about my uploaded",
-    # image specific
-    "my image", "my photo", "my picture", "my screenshot",
-    "uploaded image", "uploaded photo", "uploaded picture",
-    "this image", "this photo", "this picture",
-    "what is in the image", "what is in the picture", "what is in the photo",
-    "what is there in", "describe the image", "describe the picture",
-    "describe my image", "describe my picture", "describe my photo",
-    "read the image", "read the picture", "what does the image say",
-    "what does the picture say", "text in the image", "text in the picture",
-    "what is shown", "what can you see", "tell me about the image",
-    "tell me about the picture", "tell me about the photo",
+    "what is there in","describe the image","describe the picture",
+    "describe my image","describe my picture","describe my photo",
+    "read the image","read the picture","what does the image say",
+    "text in the image","text in the picture",
+    "what is shown","tell me about the image","tell me about the picture",
 ]
 
 
 def classify(user_input):
-    """Returns: 'casual' | 'offtopic' | 'uploaded_doc' | 'sea_buckthorn'"""
     txt = user_input.lower().strip()
 
     for kw in CASUAL:
@@ -758,302 +246,267 @@ def classify(user_input):
 
     return "sea_buckthorn"
 
-
-def detect_style(txt):
-    txt = txt.lower()
-    if any(w in txt for w in ["short", "shortly", "brief", "briefly", "summarize", "summary", "quick", "overview"]):
-        return "short"
-    if any(w in txt for w in ["detail", "detailed", "full", "elaborate", "specific", "expand", "explain"]):
-        return "detailed"
-    if any(w in txt for w in ["simple", "easy", "beginner", "basic", "plain"]):
-        return "simple"
-    return "normal"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HISTORY HELPER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_history(messages, memory_turns=6):
-    if not messages:
-        return "None"
+# These phrases mark a follow-up question (not a new topic)
+FOLLOWUP_PHRASES = [
+    # These mean "give me more/different format on the SAME topic"
+    "more specific", "be specific", "be more specific",
+    "elaborate", "tell me more", "more detail", "more details",
+    "expand", "explain more", "go deeper", "give example", "give examples",
+    "more about it", "more about that", "continue", "what else",
+    "specifically", "in detail", "say more", "and also",
+    "in simple", "make it simple", "explain simply",
+    "tell me briefly", "tell me in brief", "tell me in short",
+    "tell me shortly", "give me brief", "give me short",
+]
+
+
+def get_history(messages, memory_turns=10):
+    """Return last N messages as readable string."""
+    if not messages: return "None"
     lines = []
     for msg in messages[-memory_turns:]:
         role    = "User" if msg["role"] == "user" else "Assistant"
-        content = msg["content"][:250] + "..." if len(msg["content"]) > 250 else msg["content"]
+        content = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
         lines.append(f"{role}: {content}")
     return "\n".join(lines)
+
+
+def find_last_real_topic(messages):
+    """
+    Walk backwards through messages to find the last REAL topic question.
+    Skips follow-up questions like 'tell me briefly', 'be more specific', etc.
+    """
+    for msg in reversed(messages):
+        if msg["role"] != "user":
+            continue
+        q       = msg["content"].strip()
+        q_lower = q.lower()
+        # Skip only if it's an explicit follow-up phrase
+        is_followup = any(kw in q_lower for kw in FOLLOWUP_PHRASES)
+        if not is_followup:
+            return q
+    return ""
+
+
+def is_followup_question(user_input):
+    """Check if the current question is a follow-up."""
+    q_lower = user_input.lower().strip()
+    return any(kw in q_lower for kw in FOLLOWUP_PHRASES)
+
+
+def get_response_style(user_input):
+    """Detect what style of response the user wants."""
+    q = user_input.lower()
+    # "in short" / "shortly" = actually short 3-4 lines
+    if any(w in q for w in ["in short", "tell me in short", "shortly", "tell me shortly",
+                             "quick", "summarize", "summary"]):
+        return "short"
+    # "brief" / "briefly" / "in brief" = structured complete answer
+    if any(w in q for w in ["briefly", "tell me briefly", "brief", "in brief",
+                             "tell me in brief", "give me brief", "give brief"]):
+        return "brief"
+    if any(w in q for w in ["detail", "detailed", "elaborate", "expand", "explain", "full"]):
+        return "detailed"
+    if any(w in q for w in ["simple", "easy", "beginner", "basic", "plain", "simply"]):
+        return "simple"
+    return "normal"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ANSWER FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
 def answer_casual(question):
-    """Friendly 1-2 sentence reply. No Sea Buckthorn content."""
-    casual_responses = {
+    quick = {
         "hi":           "Hello! 👋 How can I help you with Sea Buckthorn today?",
         "hello":        "Hello! 👋 How can I help you with Sea Buckthorn today?",
-        "hey":          "Hey! How can I help you today?",
+        "hey":          "Hey there! How can I help you today?",
         "thank you":    "You're welcome! Feel free to ask anything about Sea Buckthorn. 🌿",
-        "thanks":       "You're welcome! Feel free to ask anything about Sea Buckthorn. 🌿",
+        "thanks":       "You're welcome! Ask me anything about Sea Buckthorn. 🌿",
         "bye":          "Goodbye! Take care! 👋",
         "goodbye":      "Goodbye! Take care! 👋",
-        "good morning": "Good morning! ☀️ Hope you have a great day. How can I help you with Sea Buckthorn?",
+        "good morning": "Good morning! ☀️ How can I help you with Sea Buckthorn today?",
         "good evening": "Good evening! 🌙 How can I help you with Sea Buckthorn today?",
     }
     q = question.lower().strip()
-    for key, response in casual_responses.items():
+    for key, response in quick.items():
         if key in q:
             return response
 
     prompt = ChatPromptTemplate.from_template(
-        'The user said: "{question}"\n'
-        "Reply in exactly 1-2 friendly sentences. "
-        "Do NOT mention Sea Buckthorn or give health info. "
-        "Just be warm and natural.\nREPLY:"
+        'User said: "{question}"\n'
+        "Reply in 1-2 friendly sentences only. "
+        "Do NOT mention Sea Buckthorn. Just be warm and natural.\nREPLY:"
     )
     return (prompt | llm | StrOutputParser()).invoke({"question": question})
 
 
 def answer_offtopic(question):
     return (
-        "I'm a Sea Buckthorn healthcare specialist and can't help with that topic. 😊\n\n"
-        "Ask me anything about Sea Buckthorn — its benefits, nutrition, safety, uses, and more! 🌿"
+        "I'm a Sea Buckthorn healthcare specialist and can't help with that. 😊\n\n"
+        "Feel free to ask me anything about Sea Buckthorn — benefits, nutrition, safety, uses, and more! 🌿"
     )
 
 
 def answer_uploaded_doc(question, style):
-    """Answer from uploaded docs ONLY — completely separate from data/ folder."""
     if not st.session_state.uploaded_doc_texts:
         return (
             "⚠️ No uploaded documents found.\n\n"
             "Please upload a file using the sidebar and click **'📥 Load Documents'**."
         )
 
-    IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp")
-    image_files     = [f for f in st.session_state.uploaded_doc_texts if f.lower().endswith(IMAGE_EXTENSIONS)]
-    non_image_files = [f for f in st.session_state.uploaded_doc_texts if not f.lower().endswith(IMAGE_EXTENSIONS)]
+    IMAGE_EXTS_LOWER = (".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif", ".webp")
+    all_filenames    = list(st.session_state.uploaded_doc_texts.keys())
+    context          = ""
 
-    # ── Image uploaded → describe OCR extracted text ───────────────────────
-    if image_files:
-        image_context = ""
-        for fname in image_files:
-            text = st.session_state.uploaded_doc_texts[fname]
+    # Build context from EVERY uploaded file — image or document
+    for fname, text in st.session_state.uploaded_doc_texts.items():
+        is_image = fname.lower().endswith(IMAGE_EXTS_LOWER)
+        if is_image:
             if text.strip():
-                image_context += f"\n\n=== Text extracted from image '{fname}' using OCR ===\n{text}"
+                context += f"\n\n=== IMAGE FILE: {fname} ===\nText found in image (via OCR):\n{text.strip()}"
             else:
-                image_context += f"\n\n=== Image: {fname} ===\nNo readable text found in this image."
+                context += f"\n\n=== IMAGE FILE: {fname} ===\nNo readable text found in this image."
+        else:
+            if text.strip():
+                snippet  = text[:4000] + "\n...[content truncated]" if len(text) > 4000 else text
+                context += f"\n\n=== DOCUMENT FILE: {fname} ===\n{snippet.strip()}"
+            else:
+                context += f"\n\n=== DOCUMENT FILE: {fname} ===\nNo content could be extracted."
 
-        style_map = {
-            "short":    "Give a SHORT answer in 3-5 lines.",
-            "detailed": "Give a DETAILED structured answer.",
-            "simple":   "Use simple plain language.",
-            "normal":   "Give a clear complete answer.",
-        }
-        prompt = ChatPromptTemplate.from_template("""You are a helpful assistant.
+    filenames = ", ".join(all_filenames)
 
-The user uploaded an image. Here is the text extracted from it using OCR:
+    style_instruction = {
+        "brief":    "Give a structured answer covering ALL main points for each file. Use bullet points per file. Do NOT skip any file. Be organized and complete.",
+        "short":    "For each file, give 2-3 lines only summarizing the most important point.",
+        "detailed": "Give a detailed breakdown for each file with numbered points and thorough explanation.",
+        "simple":   "Use simple plain language for each file. No jargon.",
+        "normal":   "For each file, give a clear summary of what it contains.",
+    }[style]
 
-{image_context}
+    prompt = ChatPromptTemplate.from_template("""You are a helpful assistant.
 
-USER ASKED: {question}
+The user uploaded {count} file(s): {filenames}
 
-INSTRUCTIONS:
-{style}
-- Describe what the image contains based on the OCR extracted text
-- If OCR found text: explain what it says clearly
-- If no text was found: say "The image does not contain readable text. It may be a photograph without any text content."
-- Be specific and accurate — do NOT make up content
-
-YOUR ANSWER:""")
-        chain = prompt | llm | StrOutputParser()
-        return chain.invoke({"image_context": image_context, "question": question, "style": style_map[style]})
-
-    # ── Non-image document → answer from full text ─────────────────────────
-    context   = ""
-    filenames = ", ".join(non_image_files)
-    for fname in non_image_files:
-        text    = st.session_state.uploaded_doc_texts[fname]
-        snippet = text[:3000] + "\n...[truncated]" if len(text) > 3000 else text
-        context += f"\n\n=== FILE: {fname} ===\n{snippet}"
-
-    style_map = {
-        "short":    "Give a SHORT summary: 5-7 bullet points. Be concise.",
-        "detailed": "Give a DETAILED summary with clear sections and numbered points.",
-        "simple":   "Give a SIMPLE summary in plain everyday language. No jargon.",
-        "normal":   "Give a clear structured summary of the main topics.",
-    }
-    prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
-
-The user uploaded: {filenames}
-
-DOCUMENT CONTENT (answer ONLY from this):
+CONTENT FROM ALL UPLOADED FILES:
 {context}
 
 USER ASKED: {question}
 
 INSTRUCTIONS:
 {style}
-- Answer ONLY from the document content above
-- Do NOT use any other knowledge
-- If the document does not contain the answer, say so clearly
 
-YOUR ANSWER:""")
+CRITICAL:
+- You MUST cover EVERY file listed above — do NOT skip any
+- Start each file's section with its filename clearly
+- For IMAGE files: explain what text was found inside them
+- For DOCUMENT files: summarize their content
+- If a file has no readable content, mention that clearly
+
+ANSWER:""")
+
     chain = prompt | llm | StrOutputParser()
-    return chain.invoke({"filenames": filenames, "context": context, "question": question, "style": style_map[style]})
+    return chain.invoke({
+        "count":     len(all_filenames),
+        "filenames": filenames,
+        "context":   context,
+        "question":  question,
+        "style":     style_instruction
+    })
 
 
-def answer_sea_buckthorn(question, chat_history, style):
-    """Answer from default data/ folder with full conversation memory."""
+def answer_sea_buckthorn(question, chat_history):
     if st.session_state.default_vectorstore is None:
         return "Default knowledge base not loaded. Please add files to the data/ folder."
 
-    history = get_history(chat_history)
+    history       = get_history(chat_history)
+    is_followup   = is_followup_question(question)
+    style         = get_response_style(question)
 
-    # ── Detect follow-up vs fresh question ────────────────────────────────
-    # These are ALL the ways a user might say "continue the previous topic"
-    FOLLOWUP = [
-        "more specific", "be specific", "elaborate", "tell me more",
-        "more detail", "expand", "explain more", "go deeper",
-        "in short", "briefly", "tell me briefly", "brief",
-        "give example", "more about it", "more about that",
-        "continue", "what else", "and", "also",
-        "be more", "give more", "show more", "say more",
-        "specifically", "in detail", "in brief",
-    ]
-    is_followup = any(kw in question.lower() for kw in FOLLOWUP)
-
-    # Also treat very short questions (under 4 words) as follow-ups
-    # e.g. "tell me briefly", "be specific", "in short"
-    word_count   = len(question.strip().split())
-    if word_count <= 4 and history != "None":
-        is_followup = True
-
+    # ── Build search query ─────────────────────────────────────────────────
     if is_followup:
-        # Find the LAST non-followup user question = the actual topic
-        lines         = history.split("\n")
-        topic_question = ""
-
-        # Walk backwards through history to find last meaningful user question
-        # Skip follow-up questions like "tell me briefly", "in short", etc
-        FOLLOWUP_PHRASES = [
-            "briefly", "brief", "in short", "in detail", "elaborate",
-            "more specific", "tell me more", "explain more", "be specific",
-            "give example", "expand", "continue", "what else", "say more",
-            "specifically", "more about", "go deeper"
-        ]
-
-        for l in reversed(lines):
-            if l.startswith("User:"):
-                user_q = l.replace("User:", "").strip()
-                # Check if this user message is itself a follow-up
-                is_this_followup = any(kw in user_q.lower() for kw in FOLLOWUP_PHRASES)
-                is_this_short    = len(user_q.split()) <= 4
-                if not is_this_followup and not is_this_short:
-                    topic_question = user_q
-                    break
-
-        # If we found a real topic question, use it; else use last bot answer
-        if topic_question:
-            search_query = f"Sea Buckthorn {topic_question[:200]}"
-        else:
-            last_bot = next((l.replace("Assistant:", "").strip()
-                             for l in reversed(lines) if l.startswith("Assistant:")), "")
-            search_query = f"Sea Buckthorn {last_bot[:150]}" if last_bot else f"Sea Buckthorn {question}"
-
-        print(f"\n🔁 Follow-up detected. Topic: {search_query[:80]}")
-
+        # Find the last REAL topic question from history
+        real_topic   = find_last_real_topic(chat_history)
+        search_query = f"Sea Buckthorn {real_topic[:200]}" if real_topic else f"Sea Buckthorn {question}"
+        print(f"\n🔁 Follow-up | Topic: {real_topic[:60]}")
     else:
-        # ── Brand/company/link — read full file directly ───────────────────
+        # Brand/company/link — read full file directly
         BRAND_KEYWORDS = [
-            "brand", "brands", "name the brand", "brand name",
-            "which company", "which brand", "who provides", "who sells",
-            "company name", "companies name", "link", "website", "url",
-            "where to buy", "where can i buy", "where to purchase",
-            "name the brands", "list the brands", "list brands"
+            "brand","brands","name the brand","brand name",
+            "which company","which brand","who provides","who sells",
+            "company name","companies name","link","website","url",
+            "where to buy","where can i buy","where to purchase",
+            "name the brands","list the brands","list brands"
         ]
-        is_brand_query = any(kw in question.lower() for kw in BRAND_KEYWORDS)
-
-        if is_brand_query:
-            full_file_content = ""
+        if any(kw in question.lower() for kw in BRAND_KEYWORDS):
+            full_content = ""
             if os.path.exists("data"):
                 for fname in os.listdir("data"):
                     fpath = os.path.join("data", fname)
                     if fname.endswith(".txt"):
                         try:
                             with open(fpath, "r", encoding="utf-8") as f:
-                                full_file_content += f"\n\n=== {fname} ===\n" + f.read()
-                        except:
-                            pass
-            if full_file_content:
+                                full_content += f"\n\n=== {fname} ===\n" + f.read()
+                        except: pass
+            if full_content:
                 brand_prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
 
-FULL DOCUMENT CONTENT:
+FULL DOCUMENT:
 {content}
 
 USER QUESTION: {question}
 
 INSTRUCTIONS:
-- Find all brand names and companies mentioned in the document
-- For brands WITH full details (website, products, use cases): show all details
-- For brands with NO details: print the name ONLY — no other text
-- NEVER write: "Not provided", "Not specified", "No details", or similar
-- Copy website URLs exactly as they appear
-- Do NOT add information from your own knowledge
+- List ALL brands/companies found in the document
+- For brands WITH details (website, products, use cases): show all details
+- For brands with NO details: print name ONLY — nothing else
+- NEVER write "Not provided", "Not specified", "No details"
+- Copy URLs exactly as they appear
 
-YOUR ANSWER:""")
-                brand_chain = brand_prompt | llm | StrOutputParser()
-                return brand_chain.invoke({
-                    "content":  full_file_content,
+ANSWER:""")
+                return (brand_prompt | llm | StrOutputParser()).invoke({
+                    "content":  full_content,
                     "question": question
                 })
-            search_query = "Sea Buckthorn companies brands"
-        else:
-            search_query = f"Sea Buckthorn {question}"
+        search_query = f"Sea Buckthorn {question}"
+        print(f"\n🔍 Fresh query: {search_query[:60]}")
 
-    print(f"\n🔍 Search: {search_query}")
+    # ── Retrieve chunks — search uploaded docs first, then default ────────
+    k         = 6
+    all_docs  = []
 
-    # ── Retrieve chunks ────────────────────────────────────────────────────
-    LINK_KEYWORDS = [
-        "link", "url", "website",
-        "name the brand", "brand name", "which brand", "which company",
-        "who provides", "who sells", "where to buy", "where to purchase",
-        "wellwith", "vedberry", "leh berry", "himaleh", "biosash",
-        "nutriorg", "patanjali", "miracle seabuck",
-    ]
-    k = 8 if any(kw in question.lower() for kw in LINK_KEYWORDS) else 4
+    # If user has uploaded documents — search them FIRST
+    if st.session_state.uploaded_vectorstore is not None:
+        up_retriever = st.session_state.uploaded_vectorstore.as_retriever(
+            search_type="similarity", search_kwargs={"k": k}
+        )
+        all_docs.extend(up_retriever.invoke(search_query))
 
-    retriever = st.session_state.default_vectorstore.as_retriever(
-        search_type="similarity", search_kwargs={"k": k}
+    # Also search default knowledge base
+    if st.session_state.default_vectorstore is not None:
+        def_retriever = st.session_state.default_vectorstore.as_retriever(
+            search_type="similarity", search_kwargs={"k": k}
+        )
+        all_docs.extend(def_retriever.invoke(search_query))
+
+    context = "\n\n".join(
+        f"[{d.metadata.get('source','?')}]: {d.page_content[:500]}"
+        for d in all_docs
     )
-    docs = retriever.invoke(search_query)
 
-    if k == 8:
-        context = "\n\n".join(
-            f"[{d.metadata.get('source','?')}]:\n{d.page_content}" for d in docs
-        )
-    else:
-        context = "\n\n".join(
-            f"[{d.metadata.get('source','?')}]: {d.page_content[:400]}" for d in docs
-        )
+    # ── Style instruction ──────────────────────────────────────────────────
+    style_instruction = {
+        "brief":    "Give a WELL-STRUCTURED and COMPLETE answer covering ALL important points. Use numbered points or bullet points. Include reasons, examples, and explanations. Do NOT cut the answer short — brief means clear and organized, not incomplete.",
+        "short":    "Give a SHORT summary in 3-4 lines only. Cover only the most important point.",
+        "detailed": "Give a highly DETAILED answer with numbered sections, sub-points, examples, and thorough explanations of every aspect.",
+        "simple":   "Use very simple plain language. No medical jargon. Short clear sentences. Easy to understand.",
+        "normal":   "Give a clear well-structured answer with bullet points, explanations, and relevant details.",
+    }[style]
 
-    style_map = {
-        "short":    "Answer in 3-5 lines ONLY. No bullet points. Be very concise.",
-        "detailed": "Give a detailed structured answer with numbered points.",
-        "simple":   "Use very simple plain language. No medical terms.",
-        "normal":   "Give a clear well-structured answer with bullet points where helpful.",
-    }
-
-    # Detect what the user ACTUALLY wants based on their follow-up phrasing
-    q_lower = question.lower()
-    if any(w in q_lower for w in ["briefly", "brief", "in brief", "in short", "shortly", "short"]):
-        forced_style = "Answer in maximum 3-5 lines. Be very concise. No bullet points."
-    elif any(w in q_lower for w in ["detail", "elaborate", "specific", "expand", "explain"]):
-        forced_style = "Give a detailed structured answer with numbered points covering all aspects."
-    elif any(w in q_lower for w in ["simple", "easy", "plain"]):
-        forced_style = "Use very simple plain language. No medical jargon."
-    else:
-        forced_style = style_map[style]
-
+    # ── Answer prompt ──────────────────────────────────────────────────────
     prompt = ChatPromptTemplate.from_template("""You are a Sea Buckthorn healthcare expert.
 
 CONVERSATION HISTORY:
@@ -1064,21 +517,16 @@ CONTEXT FROM DOCUMENTS:
 
 USER QUESTION: {question}
 
-CRITICAL INSTRUCTIONS — READ CAREFULLY:
-1. Look at the CONVERSATION HISTORY to find the LAST REAL TOPIC discussed
-   (ignore short follow-ups like "briefly", "in short", "tell me more")
-2. The LAST REAL TOPIC is what you must answer about — DO NOT switch topics
-3. Response style for this answer: {style}
-4. Use ONLY information from the CONTEXT above
-5. If not in context: "I don't have that information in my documents."
-6. Copy links and URLs exactly as they appear
-7. For brand questions: list ALL brands, do not skip any
+RESPONSE STYLE: {style}
 
-EXAMPLE:
-  History: User asked "who should not use this" → Bot answered about safety
-  User now says: "tell me in brief"
-  CORRECT: Give a BRIEF answer about WHO SHOULD NOT USE SEA BUCKTHORN ✅
-  WRONG: Talk about general Sea Buckthorn info ❌
+RULES:
+1. Read the CONVERSATION HISTORY carefully to understand the current topic
+2. The current topic being discussed is: {topic}
+3. Answer about THAT TOPIC — do NOT switch to a different topic
+4. Follow the RESPONSE STYLE exactly
+5. Use ONLY information from the CONTEXT
+6. If not in context: "I don't have that information in my documents."
+7. Copy URLs/links exactly as they appear
 
 ANSWER:""")
 
@@ -1087,7 +535,8 @@ ANSWER:""")
         "history":  history,
         "context":  context,
         "question": question,
-        "style":    forced_style
+        "style":    style_instruction,
+        "topic":    find_last_real_topic(chat_history) if is_followup else question
     })
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1096,14 +545,14 @@ ANSWER:""")
 
 def get_answer(question, chat_history):
     query_type = classify(question)
-    style      = detect_style(question)
+    style      = get_response_style(question)
 
-    print(f"\n🏷️  Type: {query_type} | Style: {style}")
+    print(f"\n🏷️  Type: {query_type} | Style: {style} | Followup: {is_followup_question(question)}")
 
     if   query_type == "casual":       return answer_casual(question)
     elif query_type == "offtopic":     return answer_offtopic(question)
     elif query_type == "uploaded_doc": return answer_uploaded_doc(question, style)
-    else:                              return answer_sea_buckthorn(question, chat_history, style)
+    else:                              return answer_sea_buckthorn(question, chat_history)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN CHAT UI
@@ -1120,7 +569,6 @@ user_input = st.chat_input("Ask anything about Sea Buckthorn...")
 
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
-
     with st.chat_message("user"):
         st.markdown(user_input)
 
