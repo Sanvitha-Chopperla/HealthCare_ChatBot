@@ -16,6 +16,7 @@ from langchain_community.document_loaders import (
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from utils.ragas_eval import evaluate_rag
 from PIL import Image
 import pytesseract
 
@@ -538,6 +539,17 @@ ANSWER:""")
         "style":    style_instruction,
         "topic":    find_last_real_topic(chat_history) if is_followup else question
     })
+# ─────────────────────────────
+# 📊 SIMPLE EVALUATION (ADD HERE)
+# ─────────────────────────────
+def simple_evaluation(question, answer, context):
+    score = {}
+
+    score["relevance"] = 1 if any(w in answer.lower() for w in question.lower().split()) else 0.5
+    score["length_score"] = min(len(answer) / 500, 1)
+    score["context_usage"] = 1 if context else 0.5
+
+    return score
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN ROUTER
@@ -578,12 +590,29 @@ if user_input:
         with st.spinner("Thinking..."):
             try:
                 answer = get_answer(
-                    question     = user_input,
-                    chat_history = st.session_state.messages[:-1]
+                question=user_input,
+                chat_history=st.session_state.messages[:-1]
                 )
+
                 st.markdown(answer)
+
+                # ─────────────────────────────
+                # 📊 SIMPLE EVALUATION (WORKING)
+                # ─────────────────────────────
+                with st.expander("📊 Evaluation", expanded=False):
+                    scores = simple_evaluation(
+                        user_input,
+                        answer,
+                        context=None  # Replace with actual context if available
+                    )
+
+                    for k, v in scores.items():
+                        st.metric(k, round(v, 2))
+
+                # ❌ REMOVE RAGAS COMPLETELY
+                # (DO NOT USE run_ragas_evaluation)
+
             except Exception as e:
                 st.error(f"Error: {str(e)}")
-                print(f"ERROR: {e}")
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
